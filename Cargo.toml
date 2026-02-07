@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
+[[bin]]
+name = "vecgen"
+path = "src/bin/vecgen.rs"
+
 [dependencies]
 # The core framework for writing SQLite extensions
 sqlite-loadable = "0.0.5"
