@@ -123,7 +123,9 @@ impl Vector {
     /// Parse a vector from a JSON array string, e.g. `"[1.0, 2.0, 3.0]"`.
     ///
     /// Under the hood this calls `serde_json::from_str` which handles
-    /// whitespace, trailing commas, and numeric coercion automatically.
+    /// whitespace and numeric coercion (integers are promoted to f64).
+    /// Note that `serde_json` enforces **strict JSON** — trailing
+    /// commas, comments, and other non-standard extensions are rejected.
     ///
     /// ### Rust note — `Result` and the `?` operator
     ///
@@ -151,7 +153,7 @@ impl Vector {
     ///
     /// | Offset | Length | Content                          |
     /// |--------|--------|----------------------------------|
-    /// | 0      | 1      | `BLOB_MAGIC` (`0xVE`)            |
+    /// | 0      | 1      | `BLOB_MAGIC` (`0xBE`)            |
     /// | 1      | 1      | `FORMAT_F32` (`0x01`)            |
     /// | 2      | 2      | dimension as little-endian `u16` |
     /// | 4      | dim×4  | `f32` elements, little-endian    |
@@ -330,18 +332,24 @@ impl Vector {
     /// the subsequent `push` / `extend_from_slice` calls don't trigger
     /// repeated reallocations.  It's a performance optimisation — the
     /// code would be correct without it, just slower for large vectors.
-    pub fn to_f32_blob(&self) -> Vec<u8> {
+    pub fn to_f32_blob(&self) -> Result<Vec<u8>> {
+        if self.dim > u16::MAX as usize {
+            return Err(Error::new_message(&format!(
+                "Vector dimension {} exceeds maximum for BLOB format ({})",
+                self.dim,
+                u16::MAX
+            )));
+        }
         let mut buf = Vec::with_capacity(HEADER_LEN + self.dim * 4);
         buf.push(BLOB_MAGIC);
         buf.push(FORMAT_F32);
         // Write dimension as two little-endian bytes.
-        // `as u16` truncates; safe because we enforce dim ≤ 65 535.
         buf.extend_from_slice(&(self.dim as u16).to_le_bytes());
         for &v in &self.data {
             // `v` is f64; cast to f32 then write its 4 LE bytes.
             buf.extend_from_slice(&(v as f32).to_le_bytes());
         }
-        buf
+        Ok(buf)
     }
 
     /// Serialize this vector into its **f16 binary BLOB** representation.
@@ -349,7 +357,14 @@ impl Vector {
     /// Same structure as [`to_f32_blob`] but each element is compressed
     /// to 2 bytes via [`f32_to_f16`].  Use this when storage or I/O
     /// bandwidth matters more than the last bits of precision.
-    pub fn to_f16_blob(&self) -> Vec<u8> {
+    pub fn to_f16_blob(&self) -> Result<Vec<u8>> {
+        if self.dim > u16::MAX as usize {
+            return Err(Error::new_message(&format!(
+                "Vector dimension {} exceeds maximum for BLOB format ({})",
+                self.dim,
+                u16::MAX
+            )));
+        }
         let mut buf = Vec::with_capacity(HEADER_LEN + self.dim * 2);
         buf.push(BLOB_MAGIC);
         buf.push(FORMAT_F16);
@@ -357,19 +372,24 @@ impl Vector {
         for &v in &self.data {
             buf.extend_from_slice(&f32_to_f16(v as f32).to_le_bytes());
         }
-        buf
+        Ok(buf)
     }
 
     /// Produce the canonical JSON string, e.g. `"[1.0,2.0,3.0]"`.
     ///
-    /// ### Rust note — `unwrap_or_else`
+    /// Returns an error if the vector contains values that cannot be
+    /// represented in JSON (e.g. NaN or Infinity decoded from a BLOB),
+    /// rather than silently returning an empty array.
     ///
-    /// `serde_json::to_string` returns a `Result`.  In theory it can
-    /// fail (e.g. if a value is NaN and the serializer is strict), so
-    /// we supply a fallback with `unwrap_or_else`.  The closure `|_|`
-    /// ignores the error and returns `"[]"`.
-    pub fn to_json_string(&self) -> String {
-        serde_json::to_string(&self.data).unwrap_or_else(|_| "[]".to_string())
+    /// ### Rust note — `map_err`
+    ///
+    /// `serde_json::to_string` returns its own `Result` type.  We use
+    /// `.map_err(...)` to convert `serde_json::Error` into
+    /// `sqlite_loadable::Error` so the caller gets a single uniform
+    /// error type.
+    pub fn to_json_string(&self) -> Result<String> {
+        serde_json::to_string(&self.data)
+            .map_err(|e| Error::new_message(&format!("Failed to serialize vector to JSON: {}", e)))
     }
 }
 

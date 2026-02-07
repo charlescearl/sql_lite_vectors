@@ -97,7 +97,14 @@ pub fn vec_assert_dim(
         .ok_or_else(|| Error::new_message("Missing 2nd argument"))?;
 
     let v1 = parse_vector_from_value(*v1_val)?;
-    let dim = api::value_int(dim_val) as usize;
+    let raw_dim = api::value_int(dim_val);
+    if raw_dim <= 0 {
+        return Err(Error::new_message(&format!(
+            "vec_assert_dim: dimension must be a positive integer, got {}",
+            raw_dim
+        )));
+    }
+    let dim = raw_dim as usize;
 
     if v1.dim != dim {
         return Err(Error::new_message(&format!(
@@ -125,7 +132,14 @@ pub fn vec_parse(context: *mut sqlite3_context, values: &[*mut sqlite3_value]) -
 
     // Optional dimension check
     if let Some(dim_val) = values.get(1) {
-        let expected = api::value_int(dim_val) as usize;
+        let raw_dim = api::value_int(dim_val);
+        if raw_dim <= 0 {
+            return Err(Error::new_message(&format!(
+                "vec_parse: dimension must be a positive integer, got {}",
+                raw_dim
+            )));
+        }
+        let expected = raw_dim as usize;
         if v.dim != expected {
             return Err(Error::new_message(&format!(
                 "vec_parse: expected {} dimensions, got {}",
@@ -134,7 +148,7 @@ pub fn vec_parse(context: *mut sqlite3_context, values: &[*mut sqlite3_value]) -
         }
     }
 
-    let json = v.to_json_string();
+    let json = v.to_json_string()?;
     api::result_text(context, json)?;
     Ok(())
 }
@@ -147,7 +161,7 @@ pub fn vec_to_f32(context: *mut sqlite3_context, values: &[*mut sqlite3_value]) 
         .get(0)
         .ok_or_else(|| Error::new_message("Missing vector argument"))?;
     let v = parse_vector_from_value(*v_val)?;
-    let blob = v.to_f32_blob();
+    let blob = v.to_f32_blob()?;
     api::result_blob(context, &blob);
     Ok(())
 }
@@ -158,7 +172,7 @@ pub fn vec_to_f16(context: *mut sqlite3_context, values: &[*mut sqlite3_value]) 
         .get(0)
         .ok_or_else(|| Error::new_message("Missing vector argument"))?;
     let v = parse_vector_from_value(*v_val)?;
-    let blob = v.to_f16_blob();
+    let blob = v.to_f16_blob()?;
     api::result_blob(context, &blob);
     Ok(())
 }
@@ -169,7 +183,7 @@ pub fn vec_to_json(context: *mut sqlite3_context, values: &[*mut sqlite3_value])
         .get(0)
         .ok_or_else(|| Error::new_message("Missing vector argument"))?;
     let v = parse_vector_from_value(*v_val)?;
-    let json = v.to_json_string();
+    let json = v.to_json_string()?;
     api::result_text(context, json)?;
     Ok(())
 }
